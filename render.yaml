@@ -21,4 +21,4 @@ services:
         value: "true"
 databases:
   - name: cssu-task-db
-    plan: basic-256mb
+    plan: free
