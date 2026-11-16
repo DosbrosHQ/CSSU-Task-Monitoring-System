@@ -1,5 +1,5 @@
 """
-CSSU Task Activity Monitoring System
+CSSU Indicators Monitoring
 Desktop application: Tkinter + SQLite + Matplotlib + xlwt (.xls export)
 
 Run:
@@ -70,6 +70,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS task_options(
             id INTEGER PRIMARY KEY, category_id INTEGER NOT NULL,
             task_name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+            indicator_type TEXT NOT NULL DEFAULT 'regular', notes TEXT DEFAULT '',
             FOREIGN KEY(category_id) REFERENCES categories(id)
         );
         CREATE TABLE IF NOT EXISTS task_logs(
@@ -105,26 +106,77 @@ class Database:
                 "INSERT INTO users(username,full_name,role,password_hash,created_at) VALUES(?,?,?,?,?)",
                 ("admin", "CSSU Administrator", "admin", hash_password("ChangeMe123!"),
                  datetime.now().isoformat(timespec="seconds")))
-        defaults = [
-            ("Receiving and Decontamination", ["Receiving/dispatch of used instruments", "Sorting and counting instruments", "Manual cleaning", "Ultrasonic cleaning", "Washer-disinfector operation"]),
-            ("Preparation and Packaging", ["Inspection of instruments", "Assembly of instrument sets", "Packaging and labeling", "Indicator placement"]),
-            ("Sterilization", ["Steam sterilizer operation", "Cycle monitoring and documentation", "Load release and documentation", "Biological/chemical indicator monitoring"]),
-            ("Storage and Distribution", ["Sterile stock arrangement", "Issuance/distribution of sterile supplies", "Inventory monitoring", "Expiry/recall checking"]),
-            ("Quality and Safety", ["Equipment inspection", "Environmental monitoring", "Incident/variance reporting", "Quality documentation"]),
-            ("Other CSSU Activities", ["Cleaning and housekeeping", "Supply replenishment", "Training/orientation", "Other assigned duty"])
-        ]
-        for category, tasks in defaults:
-            row = self.conn.execute("SELECT id FROM categories WHERE name=?", (category,)).fetchone()
-            if not row:
-                cur = self.conn.execute("INSERT INTO categories(name) VALUES(?)", (category,))
-                cid = cur.lastrowid
-            else:
+        # Keep the uploaded category/indicator library synchronized on startup.
+        # Admin indicators are available only to administrator accounts.
+        defaults = {
+            "Strategic Functions": [
+                ("Attended Information Dissemination", "admin", "Attended the dissemination of information in the conducted monthly meeting of non-clinical nursing units per semester"),
+                ("Attended Strategic Monitoring", "regular", "Attended the scheduled monthly strategic monitoring for non-clinical nursing units and cascaded relevant information during the area monthly meetings within the prescribed timeline."),
+            ],
+            "Core Functions": [
+                ("Attended Information Dissemination", "regular", "Attended the dissemination of information in the conducted monthly meeting of Nurse supervisor per semester"),
+                ("Attend LDI", "regular", "Attending in at least one (1) Leadership Development Initiative (LDI) per semester, with complete documentation properly filed."),
+                ("Create and Submit Monthly Inventory", "regular", "Creation and submission of duly signed monthly inventory reports within the set deadlines, with no identified errors."),
+                ("Preparation and Release of Supplies", "regular", "Ensure 100% accuracy in the preparation and release of all available medical supplies requested via Medix System and RIS forms, with no recorded discrepancies"),
+                ("Reproduction of Forms", "regular", "Ensure the reproduction of hospital-coded forms within the given timeline."),
+                ("Consolidation of NBB attachments", "regular", "Ensure timely and accurate (100%) consolidation of NBB attachments, with no identified discrepancies, within the given timeframe"),
+                ("Request through Wish System", "regular", "Maintain 100% accuracy in the requisition and collection of medical supplies requested through the WISH system, with zero recorded discrepancies."),
+                ("Participation in NPIS Phase 2", "regular", "Participation in the implementation of NPIS Phase 2 in the unit within the given timeline"),
+                ("Sterilization for Medical Instruments", "regular", "Sterilization procedures for all medical instruments were completed within the defined timeframe in accordance with established standards."),
+                ("Monitor Reported Incidents", "admin", "100% monitoring and documentation of all identified reportable incidents were completed within the specified timeframe."),
+                ("Incidents Reported", "admin", "All identified reportable incidents are documented within the prescribed timeframe"),
+                ("Attend Nurse Supervisors Meeting", "admin", "Attended all the monthly meetings of the Nurse Supervisors conducted by the Nursing Service Division within the semester."),
+                ("PPMP Consolidation", "admin", "Consolidation and submission of duly signed Indicative PPMP of the Nursing Service Division for 2027 within the prescribed timeline"),
+                ("Standard Registry for Medical Supplies", "admin", "Creation and submission of approved standardized registry for medical supplies within the prescribed timeline."),
+                ("Submit Documents for RFAs", "admin", "Ensuring the timely compliance and submission of all required documents for RFAs within the given timeline"),
+                ("Monitor Compliance of staff in NPIS Phase 2", "admin", "Monitoring of staff compliance in the implementation of NPIS Phase 2 in the unit within the prescribed period"),
+                ("Monitor Inventory Reports", "admin", "Monitoring of submitted duly signed inventory reports within the given timeline."),
+                ("Monitor Signed Monthly Schedule", "admin", "Monitoring of submitted of duly signed monthly schedules for the non-clinical nursing units within the semester."),
+                ("Monitor Reproduction of Froms", "admin", "Monitoring the accuracy and complete reproduction of controlled hospital forms throughout the semester"),
+                ("Monitor Entries on WISH Systems", "admin", "Monitoring the completeness and quality of medical supplies collected through the WISH system"),
+                ("Monitor Supplies on Medix and RIS", "admin", "Monitoring the completeness of requested medical supplies through Medix System and RIS form and released with no recorded discrepancies"),
+                ("Monitor Staff Involvement in LDI", "admin", "Participation in and monitoring staff involvement in at least one (1) Leadership Development Initiative (LDI) per semester with complete documentation on file"),
+                ("Submit Monthly Schedule", "admin", "Prepared and submitted duly signed monthly schedules for the units within the prescribed timeline."),
+                ("Submit Signed NBB", "admin", "Submission of duly signed documents and monitoring of at least one (1) NBB fund replenishment within the semester."),
+            ],
+            "Support Functions": [
+                ("Monitor Submitted Documents", "admin", "Monitoring of staff adherence to the submission of all mandatory statutory and regulatory documents with no corrections required within the given period."),
+                ("Submitted Precise Documents", "regular", "Submission of mandatory statutory and regulatory documents was completed within the semester with no corrections needed."),
+            ],
+        }
+        # Migrate databases created by earlier versions of the application.
+        option_columns = {r[1] for r in self.conn.execute("PRAGMA table_info(task_options)").fetchall()}
+        if "indicator_type" not in option_columns:
+            self.conn.execute("ALTER TABLE task_options ADD COLUMN indicator_type TEXT NOT NULL DEFAULT 'regular'")
+        if "notes" not in option_columns:
+            self.conn.execute("ALTER TABLE task_options ADD COLUMN notes TEXT DEFAULT ''")
+
+        legacy_categories = ["Receiving and Decontamination", "Preparation and Packaging", "Sterilization",
+                             "Storage and Distribution", "Quality and Safety", "Other CSSU Activities"]
+        for legacy in legacy_categories:
+            self.conn.execute("UPDATE categories SET active=0 WHERE name=?", (legacy,))
+
+        for category_name, indicators in defaults.items():
+            row = self.conn.execute("SELECT id FROM categories WHERE name=?", (category_name,)).fetchone()
+            if row:
                 cid = row["id"]
-            for task in tasks:
-                exists = self.conn.execute(
-                    "SELECT 1 FROM task_options WHERE category_id=? AND task_name=?", (cid, task)).fetchone()
-                if not exists:
-                    self.conn.execute("INSERT INTO task_options(category_id,task_name) VALUES(?,?)", (cid, task))
+                self.conn.execute("UPDATE categories SET active=1 WHERE id=?", (cid,))
+            else:
+                cur = self.conn.execute("INSERT INTO categories(name) VALUES(?)", (category_name,))
+                cid = cur.lastrowid
+            for indicator_name, indicator_type, indicator_notes in indicators:
+                existing = self.conn.execute(
+                    "SELECT id FROM task_options WHERE category_id=? AND task_name=?",
+                    (cid, indicator_name)).fetchone()
+                if existing:
+                    self.conn.execute(
+                        "UPDATE task_options SET active=1, indicator_type=?, "
+                        "notes=CASE WHEN COALESCE(notes,'')='' THEN ? ELSE notes END WHERE id=?",
+                        (indicator_type, indicator_notes, existing["id"]))
+                else:
+                    self.conn.execute(
+                        "INSERT INTO task_options(category_id,task_name,indicator_type,notes) VALUES(?,?,?,?)",
+                        (cid, indicator_name, indicator_type, indicator_notes))
         self.conn.commit()
 
     def audit(self, user_id, action, record_type=None, record_id=None):
@@ -142,7 +194,7 @@ class Database:
 class CSSUApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("CSSU Task Activity Monitoring System")
+        self.title("CSSU Indicators Monitoring")
         self.geometry("1280x800")
         self.minsize(1050, 680)
         self.db = Database()
@@ -172,7 +224,7 @@ class CSSUApp(tk.Tk):
         outer = ttk.Frame(self, padding=35)
         outer.place(relx=.5, rely=.48, anchor="center")
         ttk.Label(outer, text="CSSU", style="Header.TLabel").pack(pady=(0, 3))
-        ttk.Label(outer, text="TASK ACTIVITY MONITORING SYSTEM", font=("Arial", 11, "bold")).pack()
+        ttk.Label(outer, text="INDICATORS MONITORING", font=("Arial", 11, "bold")).pack()
         ttk.Label(outer, text="Daily output • Endorsement • Monthly appraisal", style="Sub.TLabel").pack(pady=(4, 22))
         form = ttk.Frame(outer, padding=22, relief="ridge")
         form.pack(fill="x")
@@ -200,7 +252,7 @@ class CSSUApp(tk.Tk):
         self.clear()
         top = ttk.Frame(self, padding=(18, 13))
         top.pack(fill="x")
-        ttk.Label(top, text="CSSU Task Activity Monitoring", style="Header.TLabel").pack(side="left")
+        ttk.Label(top, text="CSSU Indicators Monitoring", style="Header.TLabel").pack(side="left")
         ttk.Label(top, text=f"{self.user['full_name']}  |  {self.user['role'].upper()}",
                   style="Sub.TLabel").pack(side="right", padx=12)
         bar = ttk.Frame(self, padding=(15, 0, 15, 8))
@@ -213,8 +265,8 @@ class CSSUApp(tk.Tk):
         self.assignments_tab = ttk.Frame(self.tabs, padding=12)
         self.tabs.add(self.dashboard_tab, text="Dashboard")
         self.tabs.add(self.assignments_tab, text="My Assignments" if self.user["role"] == "staff" else "Delegated Tasks")
-        self.tabs.add(self.entry_tab, text="Task Entry")
-        self.tabs.add(self.history_tab, text="Task Records")
+        self.tabs.add(self.entry_tab, text="Indicator Entry")
+        self.tabs.add(self.history_tab, text="Indicator Records")
         if self.user["role"] == "admin":
             self.admin_tab = ttk.Frame(self.tabs, padding=12)
             self.tabs.add(self.admin_tab, text="Administration")
@@ -285,7 +337,7 @@ class CSSUApp(tk.Tk):
             open_assignments = self.db.conn.execute("SELECT COUNT(*) FROM delegated_tasks WHERE status IN ('Assigned','In Progress')").fetchone()[0]
         else:
             open_assignments = self.db.conn.execute("SELECT COUNT(*) FROM delegated_tasks WHERE assigned_to=? AND status IN ('Assigned','In Progress')", (self.user["id"],)).fetchone()[0]
-        cards = [("Total logged tasks", total), ("Completed", completed), ("Ongoing", ongoing),
+        cards = [("Total indicators logged", total), ("Completed", completed), ("Ongoing", ongoing),
                  ("Pending / unresolved", unresolved), ("Open delegated tasks", open_assignments)]
         for label, value in cards:
             card = ttk.LabelFrame(self.kpi_frame, text=label, padding=14); card.pack(side="left", fill="x", expand=True, padx=5)
@@ -300,8 +352,8 @@ class CSSUApp(tk.Tk):
             labels = [k for k,v in status_counts.items() if v]
             values = [v for v in status_counts.values() if v]
             if values: ax1.pie(values, labels=labels, autopct="%1.0f%%", startangle=90)
-            else: ax1.text(.5,.5,"No task data",ha="center",va="center")
-            ax1.set_title("Task status")
+            else: ax1.text(.5,.5,"No indicator data",ha="center",va="center")
+            ax1.set_title("Indicator status")
             ax2 = fig.add_subplot(122)
             staff_counts = {}
             for r in rows: staff_counts[r["full_name"]] = staff_counts.get(r["full_name"], 0) + 1
@@ -309,8 +361,8 @@ class CSSUApp(tk.Tk):
                 names = list(staff_counts.keys())[:12]
                 vals = [staff_counts[n] for n in names]
                 ax2.barh(names[::-1], vals[::-1])
-            else: ax2.text(.5,.5,"No task data",ha="center",va="center")
-            ax2.set_title("Tasks logged by staff")
+            else: ax2.text(.5,.5,"No indicator data",ha="center",va="center")
+            ax2.set_title("Indicators logged by staff")
             fig.tight_layout()
             canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
             canvas.draw(); canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -368,7 +420,7 @@ class CSSUApp(tk.Tk):
         f=ttk.Frame(win,padding=16); f.pack(fill="both",expand=True)
         ttk.Label(f,text=row["title"],font=("Arial",12,"bold"),wraplength=520).pack(anchor="w",pady=(0,8))
         if row["due_date"]: ttk.Label(f,text=f"Due date: {row['due_date']}").pack(anchor="w")
-        if row["instructions"]: ttk.Label(f,text=f"Instructions: {row['instructions']}",wraplength=520).pack(anchor="w",pady=6)
+        if row["instructions"]: ttk.Label(f,text=f"Notes: {row['instructions']}",wraplength=520).pack(anchor="w",pady=6)
         status=tk.StringVar(value=row["status"])
         ttk.Label(f,text="Progress status").pack(anchor="w",pady=(8,2))
         ttk.Combobox(f,textvariable=status,values=("Assigned","In Progress","Completed","Unable to Complete"),state="readonly",width=28).pack(anchor="w")
@@ -393,7 +445,7 @@ class CSSUApp(tk.Tk):
         f=self.delegation_admin
         ttk.Label(f,text="Delegate a task to a staff member",font=("Arial",12,"bold")).pack(anchor="w")
         form=ttk.Frame(f); form.pack(fill="x",pady=10)
-        self.del_staff_var=tk.StringVar(); self.del_title_var=tk.StringVar()
+        self.del_staff_var=tk.StringVar(); self.del_indicator_var=tk.StringVar()
         self.del_category_var=tk.StringVar(value="No category"); self.del_due_var=tk.StringVar(value=date.today().isoformat())
         self.del_priority_var=tk.StringVar(value="Normal")
         staff=self.db.rows("SELECT id,full_name FROM users WHERE role='staff' AND active=1 ORDER BY full_name")
@@ -402,29 +454,98 @@ class CSSUApp(tk.Tk):
         self.delegate_staff_combo=ttk.Combobox(form,textvariable=self.del_staff_var,values=list(self.delegate_staff_map),state="readonly",width=32)
         self.delegate_staff_combo.grid(row=1,column=0,sticky="ew",padx=5,pady=3)
         if staff: self.del_staff_var.set(staff[0]["full_name"])
-        ttk.Label(form,text="Task title").grid(row=0,column=1,sticky="w",padx=5,pady=3)
-        ttk.Entry(form,textvariable=self.del_title_var,width=42).grid(row=1,column=1,sticky="ew",padx=5,pady=3)
         cats=self.db.rows("SELECT id,name FROM categories WHERE active=1 ORDER BY name")
         self.delegate_category_map={"No category":None}; self.delegate_category_map.update({r["name"]:r["id"] for r in cats})
         ttk.Label(form,text="Category (optional)").grid(row=2,column=0,sticky="w",padx=5,pady=3)
-        ttk.Combobox(form,textvariable=self.del_category_var,values=list(self.delegate_category_map),state="readonly",width=32).grid(row=3,column=0,sticky="ew",padx=5,pady=3)
+        self.delegate_category_combo=ttk.Combobox(form,textvariable=self.del_category_var,values=list(self.delegate_category_map),state="readonly",width=32)
+        self.delegate_category_combo.grid(row=3,column=0,sticky="ew",padx=5,pady=3)
+        self.delegate_category_combo.bind("<<ComboboxSelected>>",lambda e:self.refresh_delegation_indicators())
+        ttk.Label(form,text="Indicator").grid(row=0,column=1,sticky="w",padx=5,pady=3)
+        self.delegate_indicator_combo=ttk.Combobox(form,textvariable=self.del_indicator_var,state="readonly",width=42)
+        self.delegate_indicator_combo.grid(row=1,column=1,sticky="ew",padx=5,pady=3)
+        self.delegate_indicator_combo.bind("<<ComboboxSelected>>", self.update_delegation_notes)
+        self.refresh_delegation_indicators()
         ttk.Label(form,text="Due date (YYYY-MM-DD)").grid(row=2,column=1,sticky="w",padx=5,pady=3)
         ttk.Entry(form,textvariable=self.del_due_var,width=42).grid(row=3,column=1,sticky="ew",padx=5,pady=3)
         ttk.Label(form,text="Priority").grid(row=4,column=0,sticky="w",padx=5,pady=3)
         ttk.Combobox(form,textvariable=self.del_priority_var,values=PRIORITIES,state="readonly",width=32).grid(row=5,column=0,sticky="ew",padx=5,pady=3)
         form.columnconfigure(0,weight=1); form.columnconfigure(1,weight=1)
-        ttk.Label(f,text="Instructions / expected output").pack(anchor="w",pady=(6,2))
+        ttk.Label(f,text="Notes").pack(anchor="w",pady=(6,2))
         self.del_instructions=tk.Text(f,height=4,wrap="word"); self.del_instructions.pack(fill="x")
-        ttk.Button(f,text="Delegate Task",command=self.create_delegated_task).pack(anchor="e",pady=8)
+        ttk.Button(f,text="Delegate Indicator",command=self.create_delegated_task).pack(anchor="e",pady=8)
         ttk.Label(f,text="Assignments appear in the staff member's My Assignments tab and open-task dashboard count.",foreground="#526477",wraplength=1000).pack(anchor="w")
+        ttk.Label(f,text="Existing delegations (select one to delete)",font=("Arial",10,"bold")).pack(anchor="w",pady=(12,4))
+        self.delegation_tree=ttk.Treeview(f,columns=("id","indicator","staff","assigned","status"),show="headings",height=7)
+        for col,label,width in (("id","ID",50),("indicator","Indicator",360),("staff","Assigned to",200),("assigned","Assigned date",120),("status","Status",130)):
+            self.delegation_tree.heading(col,text=label); self.delegation_tree.column(col,width=width,anchor="w")
+        self.delegation_tree.pack(fill="both",expand=True)
+        ttk.Button(f,text="Delete selected delegation",command=self.delete_delegation).pack(anchor="e",pady=6)
+        self.refresh_delegation_admin()
+
+    def refresh_delegation_admin(self):
+        if not hasattr(self, "delegation_tree"):
+            return
+        for item in self.delegation_tree.get_children():
+            self.delegation_tree.delete(item)
+        rows = self.db.rows(
+            "SELECT d.id,d.title,u.full_name,d.assigned_date,d.status "
+            "FROM delegated_tasks d JOIN users u ON u.id=d.assigned_to ORDER BY d.id DESC")
+        for r in rows:
+            self.delegation_tree.insert("", "end", iid=str(r["id"]),
+                values=(r["id"], r["title"], r["full_name"], r["assigned_date"], r["status"]))
+
+    def delete_delegation(self):
+        sel = self.delegation_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select delegation", "Select a delegation first.")
+            return
+        delegation_id = int(sel[0])
+        row = self.db.conn.execute("SELECT title FROM delegated_tasks WHERE id=?", (delegation_id,)).fetchone()
+        if not row:
+            return
+        if not messagebox.askyesno("Confirm deletion",
+                f"Permanently delete delegation '{row['title']}'? This cannot be undone."):
+            return
+        self.db.conn.execute("DELETE FROM delegated_tasks WHERE id=?", (delegation_id,))
+        self.db.conn.commit()
+        self.db.audit(self.user["id"], "Deleted delegation", "delegated_task", delegation_id)
+        self.refresh_delegation_admin()
+        self.refresh_assignments()
+        self.refresh_dashboard()
+
+    def refresh_delegation_indicators(self):
+        if not hasattr(self, "delegate_indicator_combo"):
+            return
+        category_id = self.delegate_category_map.get(self.del_category_var.get())
+        if category_id:
+            rows = self.db.rows(
+                "SELECT id,task_name,notes FROM task_options WHERE category_id=? AND active=1 AND indicator_type='regular' ORDER BY task_name",
+                (category_id,))
+        else:
+            rows = self.db.rows(
+                "SELECT id,task_name,notes FROM task_options WHERE active=1 AND indicator_type='regular' ORDER BY task_name")
+        self.delegate_indicator_map = {r["task_name"]: r["id"] for r in rows}
+        self.delegate_indicator_notes = {r["task_name"]: (r["notes"] or "") for r in rows}
+        self.delegate_indicator_combo["values"] = list(self.delegate_indicator_map)
+        if self.del_indicator_var.get() not in self.delegate_indicator_map:
+            self.del_indicator_var.set(rows[0]["task_name"] if rows else "")
+        self.update_delegation_notes()
+
+    def update_delegation_notes(self, event=None):
+        if not hasattr(self, "del_instructions"):
+            return
+        note = getattr(self, "delegate_indicator_notes", {}).get(self.del_indicator_var.get(), "")
+        self.del_instructions.delete("1.0", "end")
+        if note:
+            self.del_instructions.insert("1.0", note)
 
     def create_delegated_task(self):
-        staff_id=self.delegate_staff_map.get(self.del_staff_var.get()); title=self.del_title_var.get().strip()
+        staff_id=self.delegate_staff_map.get(self.del_staff_var.get()); title=self.del_indicator_var.get().strip()
         due_date=self.del_due_var.get().strip(); category_id=self.delegate_category_map.get(self.del_category_var.get())
         if not staff_id:
             messagebox.showerror("Select staff","Select an active staff account."); return
         if not title:
-            messagebox.showerror("Missing task","Enter a task title."); return
+            messagebox.showerror("Missing indicator","Select an indicator."); return
         if due_date:
             try: datetime.strptime(due_date,"%Y-%m-%d")
             except ValueError:
@@ -436,9 +557,9 @@ class CSSUApp(tk.Tk):
             (title,category_id,staff_id,self.user["id"],date.today().isoformat(),due_date or None,
              self.del_priority_var.get(),self.del_instructions.get("1.0","end").strip(),now,now))
         self.db.conn.commit(); self.db.audit(self.user["id"],"Delegated task","delegated_task",cur.lastrowid)
-        self.del_title_var.set(""); self.del_instructions.delete("1.0","end")
-        self.refresh_assignments(); self.refresh_dashboard()
-        messagebox.showinfo("Task delegated",f"Task assigned successfully to {self.del_staff_var.get()}.")
+        self.del_indicator_var.set(""); self.del_instructions.delete("1.0","end")
+        self.refresh_assignments(); self.refresh_dashboard(); self.refresh_delegation_admin()
+        messagebox.showinfo("Indicator delegated",f"Task assigned successfully to {self.del_staff_var.get()}.")
 
     def build_entry(self):
         for w in self.entry_tab.winfo_children(): w.destroy()
@@ -455,7 +576,7 @@ class CSSUApp(tk.Tk):
         self.e_endorsed_to = tk.StringVar()
         fields = [
             ("Date (YYYY-MM-DD)", self.e_date), ("Category", self.e_category),
-            ("Task option", self.e_task), ("Status", self.e_status),
+            ("Indicator", self.e_task), ("Status", self.e_status),
             ("Priority", self.e_priority), ("Quantity / units", self.e_quantity),
             ("Start time (optional)", self.e_start), ("End time (optional)", self.e_end),
             ("Endorsed to (optional)", self.e_endorsed_to)
@@ -469,9 +590,10 @@ class CSSUApp(tk.Tk):
             if label == "Category":
                 self.cat_combo = ttk.Combobox(cell, textvariable=var, state="readonly")
                 self.cat_combo.pack(fill="x"); self.cat_combo.bind("<<ComboboxSelected>>", self.update_task_options)
-            elif label == "Task option":
+            elif label == "Indicator":
                 self.task_combo = ttk.Combobox(cell, textvariable=var, state="readonly")
                 self.task_combo.pack(fill="x")
+                self.task_combo.bind("<<ComboboxSelected>>", self.update_indicator_notes)
             elif label == "Status":
                 ttk.Combobox(cell, textvariable=var, values=STATUSES, state="readonly").pack(fill="x")
             elif label == "Priority":
@@ -480,13 +602,13 @@ class CSSUApp(tk.Tk):
                 ttk.Entry(cell, textvariable=var).pack(fill="x")
         form.columnconfigure(0, weight=1); form.columnconfigure(1, weight=1)
         notes = ttk.Frame(form); notes.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=8, pady=6)
-        ttk.Label(notes, text="Work details / accomplishment").pack(anchor="w")
+        ttk.Label(notes, text="Notes").pack(anchor="w")
         self.e_details = tk.Text(notes, height=4, wrap="word"); self.e_details.pack(fill="x")
         ttk.Label(notes, text="Issue / reason not completed").pack(anchor="w", pady=(8,0))
         self.e_issue = tk.Text(notes, height=3, wrap="word"); self.e_issue.pack(fill="x")
         ttk.Label(notes, text="Endorsement / next action").pack(anchor="w", pady=(8,0))
         self.e_endorse = tk.Text(notes, height=3, wrap="word"); self.e_endorse.pack(fill="x")
-        ttk.Button(notes, text="Save Task Record", command=self.save_task).pack(anchor="e", pady=10)
+        ttk.Button(notes, text="Save Indicator Record", command=self.save_task).pack(anchor="e", pady=10)
         self.load_entry_options()
 
     def load_entry_options(self):
@@ -498,10 +620,19 @@ class CSSUApp(tk.Tk):
 
     def update_task_options(self, event=None):
         cid = self.category_map.get(self.e_category.get())
-        rows = self.db.rows("SELECT id,task_name FROM task_options WHERE category_id=? AND active=1 ORDER BY task_name", (cid,)) if cid else []
+        rows = self.db.rows("SELECT id,task_name,notes FROM task_options WHERE category_id=? AND active=1 AND indicator_type='regular' ORDER BY task_name", (cid,)) if cid else []
         self.task_map = {r["task_name"]: r["id"] for r in rows}
         self.task_combo["values"] = list(self.task_map)
         self.e_task.set(rows[0]["task_name"] if rows else "")
+
+    def update_indicator_notes(self, event=None):
+        """Populate the Notes field with the selected indicator's default description."""
+        if not hasattr(self, "e_details"):
+            return
+        description = getattr(self, "task_notes_map", {}).get(self.e_task.get(), "")
+        self.e_details.delete("1.0", "end")
+        if description:
+            self.e_details.insert("1.0", description)
 
     def save_task(self):
         try:
@@ -512,12 +643,12 @@ class CSSUApp(tk.Tk):
             messagebox.showerror("Invalid entry", "Enter a valid date (YYYY-MM-DD) and non-negative quantity."); return
         title = self.e_task.get().strip()
         if not title:
-            messagebox.showerror("Missing task", "Choose a task option."); return
+            messagebox.showerror("Missing indicator", "Choose a indicator."); return
         status = self.e_status.get()
         issue = self.e_issue.get("1.0", "end").strip()
         endorsement = self.e_endorse.get("1.0", "end").strip()
         if status in ("Pending", "Unresolved", "Ongoing") and not (issue or endorsement):
-            if not messagebox.askyesno("Confirm", "This task is not completed. Save without an issue or endorsement note?"): return
+            if not messagebox.askyesno("Confirm", "This indicator is not completed. Save without an issue or endorsement note?"): return
         now = datetime.now().isoformat(timespec="seconds")
         cur = self.db.conn.execute("""INSERT INTO task_logs
         (staff_id,task_date,category_id,task_option_id,task_title,quantity,status,priority,start_time,end_time,
@@ -527,8 +658,8 @@ class CSSUApp(tk.Tk):
          self.task_map.get(title), title, qty, status, self.e_priority.get(), self.e_start.get().strip(),
          self.e_end.get().strip(), self.e_details.get("1.0","end").strip(), issue, endorsement,
          self.e_endorsed_to.get().strip(), now, now))
-        self.db.conn.commit(); self.db.audit(self.user["id"], "Created task", "task", cur.lastrowid)
-        messagebox.showinfo("Saved", "Task record saved.")
+        self.db.conn.commit(); self.db.audit(self.user["id"], "Created indicator record", "task", cur.lastrowid)
+        messagebox.showinfo("Saved", "Indicator record saved.")
         self.e_details.delete("1.0","end"); self.e_issue.delete("1.0","end"); self.e_endorse.delete("1.0","end")
         self.e_quantity.set("1"); self.e_start.set(""); self.e_end.set(""); self.e_endorsed_to.set("")
         self.refresh_history(); self.refresh_dashboard()
@@ -536,7 +667,7 @@ class CSSUApp(tk.Tk):
     def build_history(self):
         for w in self.history_tab.winfo_children(): w.destroy()
         top = ttk.Frame(self.history_tab); top.pack(fill="x", pady=(0, 8))
-        ttk.Label(top, text="Task Records", font=("Arial", 15, "bold")).pack(side="left")
+        ttk.Label(top, text="Indicator Records", font=("Arial", 15, "bold")).pack(side="left")
         ttk.Label(top, text="Month (YYYY-MM)").pack(side="left", padx=(20,5))
         self.hist_month = tk.StringVar(value=date.today().strftime("%Y-%m"))
         ttk.Entry(top, textvariable=self.hist_month, width=10).pack(side="left")
@@ -545,7 +676,7 @@ class CSSUApp(tk.Tk):
         ttk.Button(top, text="Update selected status / endorsement", command=self.update_selected).pack(side="right", padx=6)
         cols = ("id","date","staff","task","status","priority","qty","endorsed_to")
         self.tree = ttk.Treeview(self.history_tab, columns=cols, show="headings")
-        headings = {"id":"ID","date":"Date","staff":"Staff","task":"Task","status":"Status",
+        headings = {"id":"ID","date":"Date","staff":"Staff","task":"Indicator","status":"Status",
                     "priority":"Priority","qty":"Qty","endorsed_to":"Endorsed to"}
         widths = {"id":50,"date":95,"staff":160,"task":300,"status":110,"priority":85,"qty":60,"endorsed_to":140}
         for col in cols:
@@ -575,11 +706,11 @@ class CSSUApp(tk.Tk):
     def update_selected(self):
         sel = self.tree.selection()
         if not sel:
-            messagebox.showwarning("Select record", "Select a task record first."); return
+            messagebox.showwarning("Select record", "Select a indicator record first."); return
         task_id = int(sel[0])
         row = self.db.conn.execute("SELECT * FROM task_logs WHERE id=?", (task_id,)).fetchone()
         if self.user["role"] != "admin" and row["staff_id"] != self.user["id"]:
-            messagebox.showerror("Not allowed", "You can only update your own task records."); return
+            messagebox.showerror("Not allowed", "You can only update your own indicator records."); return
         win = tk.Toplevel(self); win.title("Update task status / endorsement"); win.transient(self); win.grab_set()
         f = ttk.Frame(win, padding=15); f.pack(fill="both", expand=True)
         status = tk.StringVar(value=row["status"]); to = tk.StringVar(value=row["endorsed_to"] or "")
@@ -594,7 +725,7 @@ class CSSUApp(tk.Tk):
         def save():
             self.db.conn.execute("UPDATE task_logs SET status=?,endorsed_to=?,endorsement=?,updated_at=? WHERE id=?",
                 (status.get(),to.get().strip(),note.get("1.0","end").strip(),datetime.now().isoformat(timespec="seconds"),task_id))
-            self.db.conn.commit(); self.db.audit(self.user["id"], "Updated task", "task", task_id)
+            self.db.conn.commit(); self.db.audit(self.user["id"], "Updated indicator record", "task", task_id)
             win.destroy(); self.refresh_history(); self.refresh_dashboard()
         ttk.Button(f, text="Save changes", command=save).pack(anchor="e", pady=7)
 
@@ -607,11 +738,11 @@ class CSSUApp(tk.Tk):
         if not rows:
             messagebox.showinfo("No data", "There are no records for this month/filter."); return
         path = filedialog.asksaveasfilename(defaultextension=".xls",
-            initialfile=f"CSSU_Task_Output_{self.hist_month.get()}.xls",
+            initialfile=f"CSSU_Indicators_Output_{self.hist_month.get()}.xls",
             filetypes=[("Excel 97-2003 workbook","*.xls")])
         if not path: return
-        wb = xlwt.Workbook(encoding="utf-8"); ws = wb.add_sheet("Task Output")
-        headers = ["Record ID","Date","Staff","Category","Task","Quantity","Status","Priority",
+        wb = xlwt.Workbook(encoding="utf-8"); ws = wb.add_sheet("Indicator Output")
+        headers = ["Record ID","Date","Staff","Category","Indicator","Quantity","Status","Priority",
                    "Start time","End time","Details","Issue","Endorsement","Endorsed to","Last updated"]
         header_style = xlwt.easyxf("font: bold on; pattern: pattern solid, fore_colour ice_blue;")
         for c,h in enumerate(headers): ws.write(0,c,h,header_style)
@@ -640,7 +771,7 @@ class CSSUApp(tk.Tk):
         self.delegation_admin = ttk.Frame(nb, padding=10)
         nb.add(self.staff_admin, text="Staff Accounts")
         nb.add(self.category_admin, text="Categories")
-        nb.add(self.task_admin, text="Task Options")
+        nb.add(self.task_admin, text="Indicators")
         nb.add(self.delegation_admin, text="Task Delegation")
         self.build_staff_admin(); self.build_category_admin(); self.build_task_admin(); self.build_delegation_admin()
 
@@ -660,7 +791,9 @@ class CSSUApp(tk.Tk):
         for c,h,w in (("id","ID",50),("username","Username",160),("name","Full name",260),("role","Role",100),("active","Active",80)):
             self.staff_tree.heading(c,text=h); self.staff_tree.column(c,width=w)
         self.staff_tree.pack(fill="both",expand=True,pady=8)
-        ttk.Button(f,text="Activate / deactivate selected account",command=self.toggle_staff).pack(anchor="e")
+        actions=ttk.Frame(f); actions.pack(fill="x")
+        ttk.Button(actions,text="Activate / deactivate selected account",command=self.toggle_staff).pack(side="left")
+        ttk.Button(actions,text="Delete selected staff",command=self.delete_staff).pack(side="right")
         self.refresh_staff()
 
     def add_staff(self):
@@ -691,9 +824,45 @@ class CSSUApp(tk.Tk):
             self.delegate_staff_map={r["full_name"]:r["id"] for r in self.db.rows("SELECT id,full_name FROM users WHERE role='staff' AND active=1 ORDER BY full_name")}
             self.delegate_staff_combo["values"]=list(self.delegate_staff_map)
 
+    def delete_staff(self):
+        sel = self.staff_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select staff", "Select a staff account first.")
+            return
+        uid = int(sel[0])
+        if uid == self.user["id"]:
+            messagebox.showwarning("Not allowed", "You cannot delete your own account.")
+            return
+        row = self.db.conn.execute("SELECT full_name FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            return
+        if not messagebox.askyesno("Confirm deletion",
+                f"Delete staff account '{row['full_name']}'? If it has historical records or delegations, it will be deactivated instead."):
+            return
+        refs = self.db.conn.execute(
+            "SELECT (SELECT COUNT(*) FROM task_logs WHERE staff_id=?) + "
+            "(SELECT COUNT(*) FROM delegated_tasks WHERE assigned_to=? OR assigned_by=?) + "
+            "(SELECT COUNT(*) FROM audit_log WHERE user_id=?)",
+            (uid, uid, uid, uid)).fetchone()[0]
+        if refs:
+            self.db.conn.execute("UPDATE users SET active=0 WHERE id=?", (uid,))
+            action = "Deactivated staff account with historical references"
+        else:
+            self.db.conn.execute("DELETE FROM users WHERE id=?", (uid,))
+            action = "Deleted staff account"
+        self.db.conn.commit()
+        self.db.audit(self.user["id"], action, "user", uid)
+        self.refresh_staff()
+        if hasattr(self, "delegate_staff_combo"):
+            self.delegate_staff_map = {r["full_name"]: r["id"] for r in self.db.rows(
+                "SELECT id,full_name FROM users WHERE role='staff' AND active=1 ORDER BY full_name")}
+            self.delegate_staff_combo["values"] = list(self.delegate_staff_map)
+        messagebox.showinfo("Staff management", "Staff account deleted." if not refs else
+                            "Staff account has historical records/delegations and was deactivated.")
+
     def build_category_admin(self):
         f=self.category_admin
-        ttk.Label(f,text="Add or deactivate task categories",font=("Arial",12,"bold")).pack(anchor="w")
+        ttk.Label(f,text="Add or delete indicator categories",font=("Arial",12,"bold")).pack(anchor="w")
         line=ttk.Frame(f); line.pack(fill="x",pady=8)
         self.new_category=tk.StringVar()
         ttk.Entry(line,textvariable=self.new_category,width=40).pack(side="left")
@@ -702,7 +871,9 @@ class CSSUApp(tk.Tk):
         for c,h,w in (("id","ID",60),("name","Category",400),("active","Active",100)):
             self.cat_tree.heading(c,text=h); self.cat_tree.column(c,width=w)
         self.cat_tree.pack(fill="both",expand=True,pady=8)
-        ttk.Button(f,text="Activate / deactivate selected",command=self.toggle_category).pack(anchor="e")
+        actions=ttk.Frame(f); actions.pack(fill="x")
+        ttk.Button(actions,text="Activate / deactivate selected",command=self.toggle_category).pack(side="left")
+        ttk.Button(actions,text="Delete selected category",command=self.delete_category).pack(side="right")
         self.refresh_categories()
 
     def add_category(self):
@@ -726,21 +897,66 @@ class CSSUApp(tk.Tk):
         self.db.conn.execute("UPDATE categories SET active=? WHERE id=?",(0 if row["active"] else 1,cid)); self.db.conn.commit()
         self.db.audit(self.user["id"],"Changed category active state","category",cid); self.refresh_categories()
 
+    def delete_category(self):
+        sel = self.cat_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select category", "Select a category first.")
+            return
+        cid = int(sel[0])
+        row = self.db.conn.execute("SELECT name FROM categories WHERE id=?", (cid,)).fetchone()
+        if not row:
+            return
+        if not messagebox.askyesno("Confirm deletion",
+                f"Delete category '{row['name']}' and its indicators? Records already using it will be preserved; the category will be deactivated instead."):
+            return
+        refs = self.db.conn.execute(
+            "SELECT (SELECT COUNT(*) FROM task_logs WHERE category_id=?) + "
+            "(SELECT COUNT(*) FROM delegated_tasks WHERE category_id=?)", (cid, cid)).fetchone()[0]
+        option_refs = self.db.conn.execute(
+            "SELECT COUNT(*) FROM task_logs WHERE task_option_id IN "
+            "(SELECT id FROM task_options WHERE category_id=?)", (cid,)).fetchone()[0]
+        if refs or option_refs:
+            self.db.conn.execute("UPDATE categories SET active=0 WHERE id=?", (cid,))
+            self.db.conn.execute("UPDATE task_options SET active=0 WHERE category_id=?", (cid,))
+            action = "Deactivated category and indicators with historical references"
+        else:
+            self.db.conn.execute("DELETE FROM task_options WHERE category_id=?", (cid,))
+            self.db.conn.execute("DELETE FROM categories WHERE id=?", (cid,))
+            action = "Deleted category and indicators"
+        self.db.conn.commit()
+        self.db.audit(self.user["id"], action, "category", cid)
+        self.refresh_categories()
+        self.refresh_task_admin()
+        self.load_entry_options()
+        messagebox.showinfo("Category management", "Category and indicators deleted." if not (refs or option_refs)
+                            else "Category is in use by existing records and was deactivated to preserve history.")
+
     def build_task_admin(self):
         f=self.task_admin
-        ttk.Label(f,text="Manage task options",font=("Arial",12,"bold")).pack(anchor="w")
+        ttk.Label(f,text="Manage indicators",font=("Arial",12,"bold")).pack(anchor="w")
         line=ttk.Frame(f); line.pack(fill="x",pady=8)
         self.task_cat_var=tk.StringVar(); self.task_new_var=tk.StringVar()
-        self.task_cat_combo=ttk.Combobox(line,textvariable=self.task_cat_var,state="readonly",width=34)
+        self.task_type_var=tk.StringVar(value="regular")
+        self.task_cat_combo=ttk.Combobox(line,textvariable=self.task_cat_var,state="readonly",width=30)
         self.task_cat_combo.pack(side="left",padx=(0,6)); self.task_cat_combo.bind("<<ComboboxSelected>>",lambda e:self.refresh_task_admin())
-        ttk.Entry(line,textvariable=self.task_new_var,width=38).pack(side="left",padx=5)
-        ttk.Button(line,text="Add task option",command=self.add_task_option).pack(side="left",padx=5)
-        self.task_tree=ttk.Treeview(f,columns=("id","task","active"),show="headings",height=14)
-        for c,h,w in (("id","ID",60),("task","Task option",450),("active","Active",100)):
+        ttk.Entry(line,textvariable=self.task_new_var,width=34).pack(side="left",padx=5)
+        ttk.Combobox(line,textvariable=self.task_type_var,values=("regular","admin"),state="readonly",width=12).pack(side="left",padx=5)
+        ttk.Button(line,text="Add indicator",command=self.add_task_option).pack(side="left",padx=5)
+        self.task_tree=ttk.Treeview(f,columns=("id","task","type","active"),show="headings",height=11)
+        for c,h,w in (("id","ID",50),("task","Indicator",390),("type","Visibility",110),("active","Active",75)):
             self.task_tree.heading(c,text=h); self.task_tree.column(c,width=w)
+        self.task_tree.bind("<<TreeviewSelect>>", self.load_admin_indicator_notes)
         self.task_tree.pack(fill="both",expand=True,pady=8)
-        ttk.Button(f,text="Activate / deactivate selected",command=self.toggle_task_option).pack(anchor="e")
+        actions=ttk.Frame(f); actions.pack(fill="x")
+        ttk.Button(actions,text="Activate / deactivate selected",command=self.toggle_task_option).pack(side="left")
+        ttk.Button(actions,text="Delete selected indicator",command=self.delete_indicator).pack(side="right")
+        notes_frame=ttk.LabelFrame(f,text="Indicator Notes / Description",padding=6)
+        notes_frame.pack(fill="x",pady=(8,0))
+        self.admin_indicator_notes=tk.Text(notes_frame,height=3,wrap="word")
+        self.admin_indicator_notes.pack(fill="x")
+        ttk.Button(notes_frame,text="Save Notes",command=self.save_admin_indicator_notes).pack(anchor="e",pady=(4,0))
         self.refresh_task_admin()
+        self.refresh_delegation_indicators()
 
     def refresh_task_admin(self):
         cats=self.db.rows("SELECT id,name FROM categories ORDER BY name")
@@ -752,21 +968,72 @@ class CSSUApp(tk.Tk):
         cid=self.admin_cat_map.get(self.task_cat_var.get())
         if cid:
             for r in self.db.rows("SELECT * FROM task_options WHERE category_id=? ORDER BY task_name",(cid,)):
-                self.task_tree.insert("","end",iid=str(r["id"]),values=(r["id"],r["task_name"],"Yes" if r["active"] else "No"))
+                self.task_tree.insert("","end",iid=str(r["id"]),values=(r["id"],r["task_name"],r["indicator_type"].title(),"Yes" if r["active"] else "No"))
 
     def add_task_option(self):
         cid=self.admin_cat_map.get(self.task_cat_var.get()); name=self.task_new_var.get().strip()
         if not cid or not name:return
-        self.db.conn.execute("INSERT INTO task_options(category_id,task_name) VALUES(?,?)",(cid,name))
-        self.db.conn.commit(); self.db.audit(self.user["id"],"Added task option","task_option")
+        self.db.conn.execute("INSERT INTO task_options(category_id,task_name,indicator_type) VALUES(?,?,?)",(cid,name,self.task_type_var.get()))
+        self.db.conn.commit(); self.db.audit(self.user["id"],"Added indicator","task_option")
         self.task_new_var.set(""); self.refresh_task_admin()
+
+    def load_admin_indicator_notes(self, event=None):
+        if not hasattr(self, "admin_indicator_notes"):
+            return
+        sel = self.task_tree.selection()
+        self.admin_indicator_notes.delete("1.0", "end")
+        if sel:
+            row = self.db.conn.execute("SELECT notes FROM task_options WHERE id=?", (int(sel[0]),)).fetchone()
+            if row and row["notes"]:
+                self.admin_indicator_notes.insert("1.0", row["notes"])
+
+    def save_admin_indicator_notes(self):
+        sel = self.task_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select indicator", "Select an indicator first.")
+            return
+        indicator_id = int(sel[0])
+        notes = self.admin_indicator_notes.get("1.0", "end").strip()
+        self.db.conn.execute("UPDATE task_options SET notes=? WHERE id=?", (notes, indicator_id))
+        self.db.conn.commit()
+        self.db.audit(self.user["id"], "Updated indicator notes", "indicator", indicator_id)
+        self.refresh_task_admin()
+        messagebox.showinfo("Saved", "Indicator Notes saved.")
+
+    def delete_indicator(self):
+        sel = self.task_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select indicator", "Select an indicator first.")
+            return
+        indicator_id = int(sel[0])
+        row = self.db.conn.execute("SELECT task_name FROM task_options WHERE id=?", (indicator_id,)).fetchone()
+        if not row:
+            return
+        if not messagebox.askyesno("Confirm deletion",
+                f"Delete indicator '{row['task_name']}'? Existing records using it will be preserved; the indicator will be deactivated instead."):
+            return
+        refs = self.db.conn.execute(
+            "SELECT COUNT(*) FROM task_logs WHERE task_option_id=?", (indicator_id,)).fetchone()[0]
+        if refs:
+            self.db.conn.execute("UPDATE task_options SET active=0 WHERE id=?", (indicator_id,))
+            action = "Deactivated indicator with historical references"
+        else:
+            self.db.conn.execute("DELETE FROM task_options WHERE id=?", (indicator_id,))
+            action = "Deleted indicator"
+        self.db.conn.commit()
+        self.db.audit(self.user["id"], action, "indicator", indicator_id)
+        self.refresh_task_admin()
+        self.load_entry_options()
+        messagebox.showinfo("Indicator management", "Indicator deleted." if not refs else
+                            "Indicator has existing records and was deactivated to preserve history.")
 
     def toggle_task_option(self):
         sel=self.task_tree.selection()
         if not sel:return
         tid=int(sel[0]); row=self.db.conn.execute("SELECT active FROM task_options WHERE id=?",(tid,)).fetchone()
         self.db.conn.execute("UPDATE task_options SET active=? WHERE id=?",(0 if row["active"] else 1,tid)); self.db.conn.commit()
-        self.db.audit(self.user["id"],"Changed task option active state","task_option",tid); self.refresh_task_admin()
+        self.db.audit(self.user["id"],"Changed indicator active state","task_option",tid); self.refresh_task_admin()
+        self.load_entry_options()
 
 
 if __name__ == "__main__":
