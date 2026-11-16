@@ -258,7 +258,7 @@ def tasks():
     if current_user.role!='admin': option_q=option_q.filter(TaskOption.indicator_type=='regular')
     options=option_q.order_by(Category.name,TaskOption.task_name).all()
     return render_template('tasks.html',logs=q.limit(250).all(),
-        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options)
+        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options,today=date.today())
 
 @app.post('/tasks/<int:tid>/update')
 @login_required
