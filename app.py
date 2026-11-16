@@ -100,6 +100,12 @@ def seed():
             pw='ChangeMe123!'
             app.logger.warning('Using starter admin password. Set ADMIN_PASSWORD in Render and change it immediately.')
         db.session.add(User(username='admin',full_name='CSSU Administrator',role='admin',password_hash=generate_password_hash(pw)))
+    # Correct the existing misspelled indicator in place to avoid creating a duplicate.
+    old_form_indicator = TaskOption.query.filter_by(task_name='Monitor Reproduction of Froms').first()
+    if old_form_indicator:
+        old_form_indicator.task_name = 'Monitor Reproduction of Forms'
+        TaskLog.query.filter_by(task_option_id=old_form_indicator.id).update(
+            {TaskLog.task_title: 'Monitor Reproduction of Forms'}, synchronize_session=False)
     defaults=[
       ('Strategic Functions',[
         ('Attended Information Dissemination','admin','Attended the dissemination of information in the conducted monthly meeting of non-clinical nursing units per semester'),
@@ -124,7 +130,7 @@ def seed():
         ('Monitor Compliance of staff in NPIS Phase 2','admin','Monitoring of staff compliance in the implementation of NPIS Phase 2 in the unit within the prescribed period'),
         ('Monitor Inventory Reports','admin','Monitoring of submitted duly signed inventory reports within the given timeline.'),
         ('Monitor Signed Monthly Schedule','admin','Monitoring of submitted of duly signed monthly schedules for the non-clinical nursing units within the semester.'),
-        ('Monitor Reproduction of Froms','admin','Monitoring the accuracy and complete reproduction of controlled hospital forms throughout the semester'),
+        ('Monitor Reproduction of Forms','admin','Monitoring the accuracy and complete reproduction of controlled hospital forms throughout the semester'),
         ('Monitor Entries on WISH Systems','admin','Monitoring the completeness and quality of medical supplies collected through the WISH system'),
         ('Monitor Supplies on Medix and RIS','admin','Monitoring the completeness of requested medical supplies through Medix System and RIS form and released with no recorded discrepancies'),
         ('Monitor Staff Involvement in LDI','admin','Participation in and monitoring staff involvement in at least one (1) Leadership Development Initiative (LDI) per semester with complete documentation on file'),
@@ -209,12 +215,19 @@ def dashboard():
     staff_counts={u.full_name:0 for u in User.query.filter_by(role='staff',active=True).order_by(User.full_name).all()} if current_user.role=='admin' else {}
     for x in logs: staff_counts[x.staff.full_name]=staff_counts.get(x.staff.full_name,0)+1
     staff_counts=dict(sorted(staff_counts.items(), key=lambda item: item[1], reverse=True))
-    category_status_counts = {}
-    indicator_status_counts = {}
+    category_usage_counts = {}
+    indicator_usage_counts = {}
     if current_user.role == 'admin':
-        category_status_counts = {'Active': Category.query.filter_by(active=True).count(), 'Inactive': Category.query.filter_by(active=False).count()}
-        indicator_status_counts = {'Active': TaskOption.query.filter_by(active=True).count(), 'Inactive': TaskOption.query.filter_by(active=False).count()}
-    return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,open_count=assignments.count(),category_status_counts=category_status_counts,indicator_status_counts=indicator_status_counts,status_values=[counts[s] for s in STATUSES])
+        for entry in logs:
+            category_name = entry.category.name if entry.category else 'Uncategorized'
+            category_usage_counts[category_name] = category_usage_counts.get(category_name, 0) + 1
+            indicator_name = entry.task_title or 'Unnamed indicator'
+            indicator_usage_counts[indicator_name] = indicator_usage_counts.get(indicator_name, 0) + 1
+        category_usage_counts = dict(sorted(category_usage_counts.items(), key=lambda item: item[1], reverse=True))
+        indicator_usage_counts = dict(sorted(indicator_usage_counts.items(), key=lambda item: item[1], reverse=True))
+    return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,
+        open_count=assignments.count(),category_usage_counts=category_usage_counts,
+        indicator_usage_counts=indicator_usage_counts,status_values=[counts[s] for s in STATUSES])
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
 def tasks():
