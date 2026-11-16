@@ -7,6 +7,9 @@ from sqlalchemy import inspect
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 app = Flask(__name__)
 database_url = os.environ.get('DATABASE_URL', 'sqlite:///cssu_monitor_web.db')
@@ -189,7 +192,12 @@ def dashboard():
     counts={s:sum(x.status==s for x in logs) for s in STATUSES}
     staff_counts={}
     for x in logs: staff_counts[x.staff.full_name]=staff_counts.get(x.staff.full_name,0)+1
-    return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,open_count=assignments.count())
+    category_status_counts = {}
+    indicator_status_counts = {}
+    if current_user.role == 'admin':
+        category_status_counts = {'Active': Category.query.filter_by(active=True).count(), 'Inactive': Category.query.filter_by(active=False).count()}
+        indicator_status_counts = {'Active': TaskOption.query.filter_by(active=True).count(), 'Inactive': TaskOption.query.filter_by(active=False).count()}
+    return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,open_count=assignments.count(),category_status_counts=category_status_counts,indicator_status_counts=indicator_status_counts)
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
 def tasks():
@@ -408,7 +416,38 @@ def export_csv():
     resp=make_response('\ufeff'+out.getvalue()); resp.headers['Content-Type']='text/csv; charset=utf-8'; resp.headers['Content-Disposition']=f'attachment; filename=CSSU_Tasks_{month}.csv'; return resp
 @app.route('/admin/audit')
 @admin_required
-def audit_page(): return render_template('audit.html',items=AuditLog.query.order_by(AuditLog.timestamp.desc()).limit(300).all())
+def audit_page():
+    items = AuditLog.query.order_by(AuditLog.timestamp.desc(), AuditLog.id.desc()).limit(500).all()
+    total = AuditLog.query.count()
+    return render_template('audit.html', items=items, total=total)
+
+@app.route('/admin/audit/export.xlsx')
+@admin_required
+def export_audit_excel():
+    records = AuditLog.query.order_by(AuditLog.timestamp.asc(), AuditLog.id.asc()).all()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'Audit Logs'
+    headers = ['Log ID', 'Timestamp (UTC)', 'Username', 'User Full Name', 'Action', 'Record Type', 'Record ID']
+    sheet.append(headers)
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill('solid', fgColor='17365D')
+        cell.alignment = Alignment(horizontal='center')
+    for item in records:
+        user = item.user
+        sheet.append([item.id, item.timestamp.strftime('%Y-%m-%d %H:%M:%S') if item.timestamp else '', user.username if user else 'system', user.full_name if user else 'System', item.action or '', item.record_type or '', item.record_id if item.record_id is not None else ''])
+    sheet.freeze_panes = 'A2'
+    sheet.auto_filter.ref = sheet.dimensions
+    for index, width in enumerate([12,22,20,28,55,22,14], start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = make_response(output.getvalue())
+    response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    response.headers['Content-Disposition'] = 'attachment; filename=CSSU_Audit_Logs.xlsx'
+    return response
 @app.errorhandler(403)
 def forbidden(e): return render_template('error.html',code=403,message='You do not have permission to access this page.'),403
 @app.errorhandler(404)
