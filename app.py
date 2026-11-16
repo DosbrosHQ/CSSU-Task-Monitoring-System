@@ -197,7 +197,7 @@ def dashboard():
     if current_user.role == 'admin':
         category_status_counts = {'Active': Category.query.filter_by(active=True).count(), 'Inactive': Category.query.filter_by(active=False).count()}
         indicator_status_counts = {'Active': TaskOption.query.filter_by(active=True).count(), 'Inactive': TaskOption.query.filter_by(active=False).count()}
-    return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,open_count=assignments.count(),category_status_counts=category_status_counts,indicator_status_counts=indicator_status_counts)
+    return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,open_count=assignments.count(),category_status_counts=category_status_counts,indicator_status_counts=indicator_status_counts,status_values=[counts[s] for s in STATUSES])
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
 def tasks():
