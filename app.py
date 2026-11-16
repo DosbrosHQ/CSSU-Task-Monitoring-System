@@ -78,15 +78,19 @@ def audit(action, kind=None, rid=None):
 def seed():
     db.create_all()
     # Add missing columns without dropping or resetting existing records.
+    # Use the actual SQLAlchemy table names (TaskOption -> task_option,
+    # DelegatedTask -> delegated_task). create_all() creates missing tables first.
     with db.engine.begin() as conn:
-        option_cols={c["name"] for c in inspect(db.engine).get_columns("task_options")}
+        option_table = TaskOption.__tablename__
+        option_cols = {c["name"] for c in inspect(db.engine).get_columns(option_table)}
         if "indicator_type" not in option_cols:
-            conn.exec_driver_sql("ALTER TABLE task_options ADD COLUMN indicator_type VARCHAR(12) NOT NULL DEFAULT 'regular'")
+            conn.exec_driver_sql(f"ALTER TABLE {option_table} ADD COLUMN indicator_type VARCHAR(12) NOT NULL DEFAULT 'regular'")
         if "notes" not in option_cols:
-            conn.exec_driver_sql("ALTER TABLE task_options ADD COLUMN notes TEXT")
-        delegation_cols={c["name"] for c in inspect(db.engine).get_columns("delegated_tasks")}
+            conn.exec_driver_sql(f"ALTER TABLE {option_table} ADD COLUMN notes TEXT")
+        delegation_table = DelegatedTask.__tablename__
+        delegation_cols = {c["name"] for c in inspect(db.engine).get_columns(delegation_table)}
         if "task_option_id" not in delegation_cols:
-            conn.exec_driver_sql("ALTER TABLE delegated_tasks ADD COLUMN task_option_id INTEGER")
+            conn.exec_driver_sql(f"ALTER TABLE {delegation_table} ADD COLUMN task_option_id INTEGER")
     if not User.query.first():
         pw=os.environ.get('ADMIN_PASSWORD')
         if not pw:
