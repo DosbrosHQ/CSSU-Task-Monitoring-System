@@ -179,6 +179,22 @@ def change_password():
         else:
             current_user.password_hash=generate_password_hash(new); db.session.commit(); audit('Changed password'); flash('Password updated.','success'); return redirect(url_for('dashboard'))
     return render_template('password.html')
+@app.post('/admin/reset-monitoring-data')
+@admin_required
+def reset_monitoring_data():
+    # Permanently clear submitted indicator entries and delegated assignments.
+    entry_count = db.session.query(TaskLog).delete(synchronize_session=False)
+    delegation_count = db.session.query(DelegatedTask).delete(synchronize_session=False)
+    db.session.add(AuditLog(
+        user_id=current_user.id,
+        action=f'Reset monitoring data: deleted {entry_count} indicator entries and {delegation_count} delegated assignments',
+        record_type='monitoring_data_reset',
+        record_id=None
+    ))
+    db.session.commit()
+    flash(f'Reset completed. Deleted {entry_count} indicator entries and {delegation_count} delegated assignments. Staff, categories, indicators, and audit history were retained.', 'success')
+    return redirect(url_for('dashboard'))
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -190,8 +206,9 @@ def dashboard():
     logs=q.all(); assignments=DelegatedTask.query.filter(DelegatedTask.status.in_(['Assigned','In Progress']))
     if current_user.role!='admin': assignments=assignments.filter_by(assigned_to=current_user.id)
     counts={s:sum(x.status==s for x in logs) for s in STATUSES}
-    staff_counts={}
+    staff_counts={u.full_name:0 for u in User.query.filter_by(role='staff',active=True).order_by(User.full_name).all()} if current_user.role=='admin' else {}
     for x in logs: staff_counts[x.staff.full_name]=staff_counts.get(x.staff.full_name,0)+1
+    staff_counts=dict(sorted(staff_counts.items(), key=lambda item: item[1], reverse=True))
     category_status_counts = {}
     indicator_status_counts = {}
     if current_user.role == 'admin':
@@ -251,21 +268,40 @@ def assignments():
 @admin_required
 def create_assignment():
     try:
-        staff_id=int(request.form['assigned_to'])
+        assignee=request.form['assigned_to']
         indicator_id=int(request.form['indicator_id'])
         due=date.fromisoformat(request.form['due_date']) if request.form.get('due_date') else None
     except (ValueError,KeyError):
         flash('Select a valid staff member, indicator and due date.','danger')
         return redirect(url_for('assignments'))
-    member=db.session.get(User,staff_id); option=db.session.get(TaskOption,indicator_id)
-    if not member or member.role!='staff' or not member.active or not option or not option.active or not option.category.active:
-        flash('Choose an active staff account and an active indicator.','danger')
+    option=db.session.get(TaskOption,indicator_id)
+    if not option or not option.active or not option.category or not option.category.active:
+        flash('Choose an active indicator.','danger')
         return redirect(url_for('assignments'))
-    x=DelegatedTask(title=option.task_name,category_id=option.category_id,task_option_id=option.id,
-        assigned_to=staff_id,assigned_by=current_user.id,due_date=due,priority=request.form.get('priority','Normal'),
-        instructions=request.form.get('instructions','').strip() or (option.notes or ''))
-    db.session.add(x); db.session.commit(); audit('Delegated indicator','delegated_indicator',x.id)
-    flash('Indicator delegated.','success')
+    if assignee=='all':
+        members=User.query.filter_by(role='staff',active=True).order_by(User.full_name).all()
+        if not members:
+            flash('There are no active staff accounts to receive this indicator.','warning')
+            return redirect(url_for('assignments'))
+    else:
+        try: member=db.session.get(User,int(assignee))
+        except ValueError: member=None
+        if not member or member.role!='staff' or not member.active:
+            flash('Choose an active staff account or All Active Staff.','danger')
+            return redirect(url_for('assignments'))
+        members=[member]
+    instructions=request.form.get('instructions','').strip() or (option.notes or '')
+    created=[]
+    for member in members:
+        item=DelegatedTask(title=option.task_name,category_id=option.category_id,task_option_id=option.id,
+            assigned_to=member.id,assigned_by=current_user.id,due_date=due,priority=request.form.get('priority','Normal'),
+            instructions=instructions)
+        db.session.add(item)
+        db.session.flush()
+        created.append(item.id)
+    db.session.commit()
+    for item_id in created: audit('Delegated indicator','delegated_indicator',item_id)
+    flash('Indicator delegated to '+('all active staff ('+str(len(created))+')' if assignee=='all' else members[0].full_name)+'.','success')
     return redirect(url_for('assignments'))
 @app.post('/assignments/<int:tid>/update')
 @login_required
