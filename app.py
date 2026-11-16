@@ -295,18 +295,23 @@ def delete_staff(uid):
     if u.id==current_user.id:
         flash('You cannot delete your own account.','danger')
         return redirect(url_for('staff_admin'))
-    history=(TaskLog.query.filter_by(staff_id=uid).first() or
-        DelegatedTask.query.filter((DelegatedTask.assigned_to==uid)|(DelegatedTask.assigned_by==uid)).first() or
-        AuditLog.query.filter_by(user_id=uid).first())
-    if history:
-        u.active=False
-        action='Deactivated staff account with history'
-        flash('Account has historical records; it was deactivated to preserve the audit trail.','warning')
-    else:
-        db.session.delete(u)
-        action='Deleted staff account'
-        flash('Staff account deleted.','success')
-    db.session.commit(); audit(action,'user',uid)
+
+    # Permanently remove this user's activity and delegation history first
+    # to satisfy foreign-key constraints, then remove their audit entries.
+    # Delegations are removed whether the user received or issued them.
+    username=u.username
+    full_name=u.full_name
+    db.session.query(TaskLog).filter(TaskLog.staff_id==uid).delete(synchronize_session=False)
+    db.session.query(DelegatedTask).filter(
+        (DelegatedTask.assigned_to==uid) | (DelegatedTask.assigned_by==uid)
+    ).delete(synchronize_session=False)
+    db.session.query(AuditLog).filter(AuditLog.user_id==uid).delete(synchronize_session=False)
+    db.session.delete(u)
+    db.session.commit()
+
+    # Keep an audit entry for the administrator who performed the deletion.
+    audit('Permanently deleted staff account and associated records: '+full_name+' ('+username+')','user',uid)
+    flash('Staff account and its indicator records, delegations and audit history were permanently deleted.','success')
     return redirect(url_for('staff_admin'))
 
 @app.route('/admin/categories',methods=['GET','POST'])
