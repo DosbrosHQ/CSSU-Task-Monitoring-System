@@ -228,7 +228,6 @@ def dashboard():
         active_staff = User.query.filter_by(role='staff', active=True).order_by(User.full_name).all()
         staff_engagement_counts = {u.full_name: TaskLog.query.filter_by(staff_id=u.id).count() for u in active_staff}
         staff_engagement_counts = dict(sorted(staff_engagement_counts.items(), key=lambda item: item[1], reverse=True))
-    indicator_usage_counts = {}
     category_progress = {
         'Strategic Functions': {'Completed': 0, 'Partial': 0, 'Delegated': 0},
         'Core Functions': {'Completed': 0, 'Partial': 0, 'Delegated': 0},
@@ -257,14 +256,13 @@ def dashboard():
                 continue
             progress_status = 'Completed' if entry.status == 'Completed' else 'Partial'
             category_progress[category_name][progress_status] += 1
-        # Team indicator usage includes every saved entry across all dates and statuses.
-        for entry in all_time_logs:
-            indicator_name = entry.task_title or 'Unnamed indicator'
-            indicator_usage_counts[indicator_name] = indicator_usage_counts.get(indicator_name, 0) + 1
-        indicator_usage_counts = dict(sorted(indicator_usage_counts.items(), key=lambda item: item[1], reverse=True))
+    progress_totals = {
+        status: sum(category_progress[category][status] for category in category_progress)
+        for status in ['Completed', 'Partial', 'Delegated']
+    }
     return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,
-        open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,category_progress=category_progress,
-        indicator_usage_counts=indicator_usage_counts,status_values=[counts[s] for s in STATUSES],all_time_status_values=[all_time_status_counts[s] for s in STATUSES])
+        open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,
+        category_progress=category_progress,progress_totals=progress_totals)
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
 def tasks():

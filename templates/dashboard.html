@@ -1,9 +1,19 @@
 {% extends 'base.html' %}{% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3"><div><h2 class="mb-0">CSSU Indicators Monitoring</h2><div class="text-muted">Monthly indicator monitoring overview</div></div><form class="d-flex gap-2"><input class="form-control" type="month" name="month" value="{{month}}"><button class="btn btn-primary">Refresh</button></form></div>
 {% if current_user.role=='admin' %}<div class="d-flex justify-content-end mb-3"><form method="post" action="{{url_for('reset_monitoring_data')}}" onsubmit="return confirm('PERMANENTLY delete all indicator entries and delegated assignments? Staff accounts, categories, indicator definitions, and audit logs will be retained. This cannot be undone.');"><input type="hidden" name="csrf_token" value="{{csrf_token()}}"><button class="btn btn-outline-danger btn-sm">Reset Indicator Entries & Delegations</button></form></div>{% endif %}
-<div class="row g-3 mb-4">{% for label,value in [('Total indicators logged',logs|length),('Completed',counts['Completed']),('Ongoing',counts['Ongoing']),('Pending / unresolved',counts['Pending']+counts['Unresolved']),('Open delegated tasks',open_count)] %}<div class="col-6 col-lg"><div class="card p-3 h-100"><div class="text-muted">{{label}}</div><div class="kpi">{{value}}</div></div></div>{% endfor %}</div>
-<div class="row g-3"><div class="col-lg-12"><div class="card p-3 h-100"><h5>Indicator status</h5>{% for s in STATUSES %}<div class="d-flex justify-content-between"><span>{{s}}</span><strong>{{counts[s]}}</strong></div><div class="progress mb-2" style="height:8px"><div class="progress-bar" style="width:{{(counts[s]/(logs|length)*100) if logs|length else 0}}%"></div></div>{% endfor %}</div></div></div>
-{% if current_user.role=='admin' %}<div class="card p-3 mt-3"><h5>Indicators Used by the Team</h5><div class="text-muted small mb-2">Total number of entries recorded for each indicator across all dates, regardless of status.</div><div class="chart-wrap chart-wrap-wide"><canvas id="teamIndicatorUsageChart"></canvas></div></div>{% endif %}
+{% if current_user.role=='admin' %}
+<div class="row g-3 mb-4">
+{% for label,value in [('Completed',progress_totals['Completed']),('Partial',progress_totals['Partial']),('Delegated',progress_totals['Delegated'])] %}
+<div class="col-12 col-md-4"><div class="card p-3 h-100"><div class="text-muted">{{label}}</div><div class="kpi">{{value}}</div></div></div>
+{% endfor %}
+</div>
+{% else %}
+<div class="row g-3 mb-4">
+{% for label,value in [('Completed',counts['Completed']),('Partial',counts['Ongoing']+counts['Pending']+counts['Unresolved']+counts['Cancelled']),('Delegated',open_count)] %}
+<div class="col-12 col-md-4"><div class="card p-3 h-100"><div class="text-muted">{{label}}</div><div class="kpi">{{value}}</div></div></div>
+{% endfor %}
+</div>
+{% endif %}
 {% if current_user.role=='admin' %}<div class="card p-3 mt-3"><h5>Staff Engagement — Indicator Entries Encoded</h5><div class="text-muted small mb-2">Total number of indicator entries recorded by each active staff member across all dates, regardless of status.</div><div class="chart-wrap chart-wrap-wide"><canvas id="staffEngagementChart"></canvas></div></div>
 <div class="row g-3 mt-1">
 {% for category_name, chart_id in [('Strategic Functions','strategicProgressChart'),('Core Functions','coreProgressChart'),('Support Functions','supportProgressChart')] %}
@@ -20,6 +30,5 @@ renderPie('strategicProgressChart',['Completed','Partial','Delegated'],[{{catego
 renderPie('coreProgressChart',['Completed','Partial','Delegated'],[{{category_progress['Core Functions']['Completed']}},{{category_progress['Core Functions']['Partial']}},{{category_progress['Core Functions']['Delegated']}}]);
 renderPie('supportProgressChart',['Completed','Partial','Delegated'],[{{category_progress['Support Functions']['Completed']}},{{category_progress['Support Functions']['Partial']}},{{category_progress['Support Functions']['Delegated']}}]);
 new Chart(document.getElementById('staffEngagementChart'),{type:'bar',data:{labels:{{staff_engagement_counts.keys()|list|tojson}},datasets:[{label:'Entries encoded',data:{{staff_engagement_counts.values()|list|tojson}},backgroundColor:'#2878b5'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{ticks:{autoSkip:false}}},plugins:{legend:{display:false}}}});
-new Chart(document.getElementById('teamIndicatorUsageChart'),{type:'bar',data:{labels:{{indicator_usage_counts.keys()|list|tojson}},datasets:[{label:'Entries encoded',data:{{indicator_usage_counts.values()|list|tojson}},backgroundColor:'#2878b5'}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true,ticks:{precision:0}},y:{ticks:{autoSkip:false}}},plugins:{legend:{display:false}}}});
 
 </script>{% endif %}{% endblock %}
