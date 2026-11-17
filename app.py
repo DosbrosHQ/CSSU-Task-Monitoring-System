@@ -212,6 +212,13 @@ def dashboard():
     logs=q.all(); assignments=DelegatedTask.query.filter(DelegatedTask.status.in_(['Assigned','In Progress']))
     if current_user.role!='admin': assignments=assignments.filter_by(assigned_to=current_user.id)
     counts={s:sum(x.status==s for x in logs) for s in STATUSES}
+    all_time_status_counts={s:0 for s in STATUSES}
+    all_time_logs=[]
+    if current_user.role == 'admin':
+        all_time_logs=TaskLog.query.all()
+        for entry in all_time_logs:
+            if entry.status in all_time_status_counts:
+                all_time_status_counts[entry.status] += 1
     staff_counts={u.full_name:0 for u in User.query.filter_by(role='staff',active=True).order_by(User.full_name).all()} if current_user.role=='admin' else {}
     for x in logs: staff_counts[x.staff.full_name]=staff_counts.get(x.staff.full_name,0)+1
     staff_counts=dict(sorted(staff_counts.items(), key=lambda item: item[1], reverse=True))
@@ -224,8 +231,8 @@ def dashboard():
     category_usage_counts = {}
     indicator_usage_counts = {}
     if current_user.role == 'admin':
-        # Category pie chart follows the selected dashboard month.
-        for entry in logs:
+        # Category pie chart includes all saved entries across all dates and statuses.
+        for entry in all_time_logs:
             category_name = entry.category.name if entry.category else 'Uncategorized'
             category_usage_counts[category_name] = category_usage_counts.get(category_name, 0) + 1
         # Team indicator usage includes every saved entry across all dates and statuses.
@@ -236,7 +243,7 @@ def dashboard():
         indicator_usage_counts = dict(sorted(indicator_usage_counts.items(), key=lambda item: item[1], reverse=True))
     return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,
         open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,category_usage_counts=category_usage_counts,
-        indicator_usage_counts=indicator_usage_counts,status_values=[counts[s] for s in STATUSES])
+        indicator_usage_counts=indicator_usage_counts,status_values=[counts[s] for s in STATUSES],all_time_status_values=[all_time_status_counts[s] for s in STATUSES])
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
 def tasks():
