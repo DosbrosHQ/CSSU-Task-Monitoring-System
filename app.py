@@ -1,5 +1,6 @@
 import os, csv, io
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, abort, make_response
 from flask_sqlalchemy import SQLAlchemy
@@ -10,6 +11,9 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+
+def philippines_today():
+    return datetime.now(ZoneInfo('Asia/Manila')).date()
 
 app = Flask(__name__)
 database_url = os.environ.get('DATABASE_URL', 'sqlite:///cssu_monitor_web.db')
@@ -160,7 +164,7 @@ def seed():
     db.session.commit()
 
 @app.context_processor
-def globals_for_templates(): return {'STATUSES':STATUSES,'PRIORITIES':PRIORITIES,'today':date.today()}
+def globals_for_templates(): return {'STATUSES':STATUSES,'PRIORITIES':PRIORITIES,'today':philippines_today()}
 @app.route('/')
 def index(): return redirect(url_for('dashboard') if current_user.is_authenticated else url_for('login'))
 @app.route('/login', methods=['GET','POST'])
@@ -204,9 +208,9 @@ def reset_monitoring_data():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    month=request.args.get('month',date.today().strftime('%Y-%m'))
+    month=request.args.get('month',philippines_today().strftime('%Y-%m'))
     try: start=date.fromisoformat(month+'-01'); end=date(start.year+start.month//12, start.month%12+1,1)
-    except ValueError: month=date.today().strftime('%Y-%m'); start=date.today().replace(day=1); end=date(start.year+start.month//12,start.month%12+1,1)
+    except ValueError: month=philippines_today().strftime('%Y-%m'); start=philippines_today().replace(day=1); end=date(start.year+start.month//12,start.month%12+1,1)
     q=TaskLog.query.filter(TaskLog.task_date>=start,TaskLog.task_date<end)
     if current_user.role!='admin': q=q.filter_by(staff_id=current_user.id)
     logs=q.all(); assignments=DelegatedTask.query.filter(DelegatedTask.status.in_(['Assigned','In Progress']))
@@ -293,7 +297,7 @@ def tasks():
     if current_user.role!='admin': option_q=option_q.filter(TaskOption.indicator_type=='regular')
     options=option_q.order_by(Category.name,TaskOption.task_name).all()
     return render_template('tasks.html',logs=q.limit(250).all(),
-        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options,today=date.today())
+        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options,today=philippines_today())
 
 @app.post('/tasks/<int:tid>/update')
 @login_required
@@ -336,7 +340,7 @@ def assignments():
     options=TaskOption.query.join(Category).filter(TaskOption.active.is_(True),Category.active.is_(True)).order_by(Category.name,TaskOption.task_name).all()
     return render_template('assignments.html',items=q.limit(300).all(),
         staff=User.query.filter_by(role='staff',active=True).order_by(User.full_name).all(),
-        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options,today=date.today())
+        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options,today=philippines_today())
 @app.post('/assignments/create')
 @admin_required
 def create_assignment():
@@ -375,7 +379,7 @@ def create_assignment():
     db.session.commit()
     for item_id in created: audit('Delegated indicator','delegated_indicator',item_id)
     recipient_label = 'all active staff ('+str(len(created))+')' if assignee=='all' else members[0].full_name
-    if due and due < date.today():
+    if due and due < philippines_today():
         flash('OVERDUE ASSIGNMENT ALERT: The due date '+due.isoformat()+' is in the past. This indicator was delegated to '+recipient_label+'. Please review the overdue assignment.','danger')
     else:
         flash('Indicator delegated to '+recipient_label+'.','success')
@@ -521,7 +525,7 @@ def delete_assignment(tid):
 @app.route('/export.csv')
 @login_required
 def export_csv():
-    month=request.args.get('month',date.today().strftime('%Y-%m'))
+    month=request.args.get('month',philippines_today().strftime('%Y-%m'))
     q=TaskLog.query.filter(db.cast(TaskLog.task_date,db.String).like(month+'%')).order_by(TaskLog.task_date,TaskLog.id)
     if current_user.role!='admin': q=q.filter_by(staff_id=current_user.id)
     out=io.StringIO(); w=csv.writer(out); w.writerow(['Date','Staff','Category','Task','Quantity','Status','Priority','Start','End','Details','Issue','Endorsement','Endorsed To'])
