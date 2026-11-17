@@ -286,9 +286,15 @@ def update_task(tid):
         x.details=request.form.get('details',x.details)
         audit_action='Administrator updated indicator record'
     else:
-        # Staff may edit only the details/notes field of their own entry.
+        # Staff may edit their own indicator entry date and details only.
+        try:
+            edited_date = date.fromisoformat(request.form.get('task_date', str(x.task_date)))
+        except (ValueError, TypeError):
+            flash('Enter a valid indicator entry date.', 'danger')
+            return redirect(url_for('tasks'))
+        x.task_date=edited_date
         x.details=request.form.get('details',x.details)
-        audit_action='Staff updated indicator record details'
+        audit_action='Staff updated indicator entry date and details'
     db.session.commit()
     audit(audit_action,'indicator',x.id)
     flash('Indicator record details updated.' if current_user.role!='admin' else 'Indicator record updated.','success')
