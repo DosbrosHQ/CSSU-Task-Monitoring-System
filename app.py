@@ -336,7 +336,7 @@ def assignments():
     options=TaskOption.query.join(Category).filter(TaskOption.active.is_(True),Category.active.is_(True)).order_by(Category.name,TaskOption.task_name).all()
     return render_template('assignments.html',items=q.limit(300).all(),
         staff=User.query.filter_by(role='staff',active=True).order_by(User.full_name).all(),
-        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options)
+        categories=Category.query.filter_by(active=True).order_by(Category.name).all(),options=options,today=date.today())
 @app.post('/assignments/create')
 @admin_required
 def create_assignment():
