@@ -215,6 +215,12 @@ def dashboard():
     staff_counts={u.full_name:0 for u in User.query.filter_by(role='staff',active=True).order_by(User.full_name).all()} if current_user.role=='admin' else {}
     for x in logs: staff_counts[x.staff.full_name]=staff_counts.get(x.staff.full_name,0)+1
     staff_counts=dict(sorted(staff_counts.items(), key=lambda item: item[1], reverse=True))
+    # Staff engagement chart is cumulative across all dates, not limited by the dashboard month filter.
+    staff_engagement_counts = {}
+    if current_user.role == 'admin':
+        active_staff = User.query.filter_by(role='staff', active=True).order_by(User.full_name).all()
+        staff_engagement_counts = {u.full_name: TaskLog.query.filter_by(staff_id=u.id).count() for u in active_staff}
+        staff_engagement_counts = dict(sorted(staff_engagement_counts.items(), key=lambda item: item[1], reverse=True))
     category_usage_counts = {}
     indicator_usage_counts = {}
     if current_user.role == 'admin':
@@ -226,7 +232,7 @@ def dashboard():
         category_usage_counts = dict(sorted(category_usage_counts.items(), key=lambda item: item[1], reverse=True))
         indicator_usage_counts = dict(sorted(indicator_usage_counts.items(), key=lambda item: item[1], reverse=True))
     return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,
-        open_count=assignments.count(),category_usage_counts=category_usage_counts,
+        open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,category_usage_counts=category_usage_counts,
         indicator_usage_counts=indicator_usage_counts,status_values=[counts[s] for s in STATUSES])
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
@@ -265,9 +271,15 @@ def tasks():
 def update_task(tid):
     x=db.session.get(TaskLog,tid) or abort(404)
     if current_user.role!='admin' and x.staff_id!=current_user.id: abort(403)
+    try:
+        edited_date = date.fromisoformat(request.form.get('task_date', str(x.task_date)))
+    except (ValueError, TypeError):
+        flash('Enter a valid indicator entry date.', 'danger')
+        return redirect(url_for('tasks'))
+    x.task_date=edited_date
     x.status=request.form.get('status',x.status); x.priority=request.form.get('priority',x.priority)
     x.endorsement=request.form.get('endorsement',x.endorsement); x.endorsed_to=request.form.get('endorsed_to',x.endorsed_to)
-    x.issue=request.form.get('issue',x.issue); db.session.commit(); audit('Updated task','task',x.id); flash('Task updated.','success'); return redirect(url_for('tasks'))
+    x.issue=request.form.get('issue',x.issue); db.session.commit(); audit('Updated indicator record including date','indicator',x.id); flash('Indicator record updated.','success'); return redirect(url_for('tasks'))
 @app.route('/assignments')
 @login_required
 def assignments():
