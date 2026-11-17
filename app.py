@@ -224,9 +224,12 @@ def dashboard():
     category_usage_counts = {}
     indicator_usage_counts = {}
     if current_user.role == 'admin':
+        # Category pie chart follows the selected dashboard month.
         for entry in logs:
             category_name = entry.category.name if entry.category else 'Uncategorized'
             category_usage_counts[category_name] = category_usage_counts.get(category_name, 0) + 1
+        # Team indicator usage includes every saved entry across all dates and statuses.
+        for entry in TaskLog.query.all():
             indicator_name = entry.task_title or 'Unnamed indicator'
             indicator_usage_counts[indicator_name] = indicator_usage_counts.get(indicator_name, 0) + 1
         category_usage_counts = dict(sorted(category_usage_counts.items(), key=lambda item: item[1], reverse=True))
