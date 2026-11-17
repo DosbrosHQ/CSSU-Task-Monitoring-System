@@ -271,15 +271,28 @@ def tasks():
 def update_task(tid):
     x=db.session.get(TaskLog,tid) or abort(404)
     if current_user.role!='admin' and x.staff_id!=current_user.id: abort(403)
-    try:
-        edited_date = date.fromisoformat(request.form.get('task_date', str(x.task_date)))
-    except (ValueError, TypeError):
-        flash('Enter a valid indicator entry date.', 'danger')
-        return redirect(url_for('tasks'))
-    x.task_date=edited_date
-    x.status=request.form.get('status',x.status); x.priority=request.form.get('priority',x.priority)
-    x.endorsement=request.form.get('endorsement',x.endorsement); x.endorsed_to=request.form.get('endorsed_to',x.endorsed_to)
-    x.issue=request.form.get('issue',x.issue); db.session.commit(); audit('Updated indicator record including date','indicator',x.id); flash('Indicator record updated.','success'); return redirect(url_for('tasks'))
+    if current_user.role == 'admin':
+        try:
+            edited_date = date.fromisoformat(request.form.get('task_date', str(x.task_date)))
+        except (ValueError, TypeError):
+            flash('Enter a valid indicator entry date.', 'danger')
+            return redirect(url_for('tasks'))
+        x.task_date=edited_date
+        x.status=request.form.get('status',x.status)
+        x.priority=request.form.get('priority',x.priority)
+        x.endorsement=request.form.get('endorsement',x.endorsement)
+        x.endorsed_to=request.form.get('endorsed_to',x.endorsed_to)
+        x.issue=request.form.get('issue',x.issue)
+        x.details=request.form.get('details',x.details)
+        audit_action='Administrator updated indicator record'
+    else:
+        # Staff may edit only the details/notes field of their own entry.
+        x.details=request.form.get('details',x.details)
+        audit_action='Staff updated indicator record details'
+    db.session.commit()
+    audit(audit_action,'indicator',x.id)
+    flash('Indicator record details updated.' if current_user.role!='admin' else 'Indicator record updated.','success')
+    return redirect(url_for('tasks'))
 @app.route('/assignments')
 @login_required
 def assignments():
