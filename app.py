@@ -228,21 +228,42 @@ def dashboard():
         active_staff = User.query.filter_by(role='staff', active=True).order_by(User.full_name).all()
         staff_engagement_counts = {u.full_name: TaskLog.query.filter_by(staff_id=u.id).count() for u in active_staff}
         staff_engagement_counts = dict(sorted(staff_engagement_counts.items(), key=lambda item: item[1], reverse=True))
-    category_usage_counts = {}
     indicator_usage_counts = {}
+    category_progress = {
+        'Strategic Functions': {'Completed': 0, 'Partial': 0, 'Delegated': 0},
+        'Core Functions': {'Completed': 0, 'Partial': 0, 'Delegated': 0},
+        'Support Functions': {'Completed': 0, 'Partial': 0, 'Delegated': 0}
+    }
     if current_user.role == 'admin':
-        # Category pie chart includes all saved entries across all dates and statuses.
+        all_time_logs = TaskLog.query.all()
+        all_delegations = DelegatedTask.query.all()
+        option_category_ids = {o.id: o.category_id for o in TaskOption.query.all()}
+        category_names = {c.id: c.name for c in Category.query.all()}
+        # A delegated indicator is counted as Delegated even if an output record also exists.
+        delegated_pairs = set()
+        for delegation in all_delegations:
+            category_id = delegation.category_id or option_category_ids.get(delegation.task_option_id)
+            category_name = category_names.get(category_id)
+            if category_name in category_progress:
+                category_progress[category_name]['Delegated'] += 1
+            if delegation.task_option_id:
+                delegated_pairs.add((delegation.assigned_to, delegation.task_option_id))
         for entry in all_time_logs:
-            category_name = entry.category.name if entry.category else 'Uncategorized'
-            category_usage_counts[category_name] = category_usage_counts.get(category_name, 0) + 1
+            category_id = entry.category_id or option_category_ids.get(entry.task_option_id)
+            category_name = category_names.get(category_id)
+            if category_name not in category_progress:
+                continue
+            if entry.task_option_id and (entry.staff_id, entry.task_option_id) in delegated_pairs:
+                continue
+            progress_status = 'Completed' if entry.status == 'Completed' else 'Partial'
+            category_progress[category_name][progress_status] += 1
         # Team indicator usage includes every saved entry across all dates and statuses.
-        for entry in TaskLog.query.all():
+        for entry in all_time_logs:
             indicator_name = entry.task_title or 'Unnamed indicator'
             indicator_usage_counts[indicator_name] = indicator_usage_counts.get(indicator_name, 0) + 1
-        category_usage_counts = dict(sorted(category_usage_counts.items(), key=lambda item: item[1], reverse=True))
         indicator_usage_counts = dict(sorted(indicator_usage_counts.items(), key=lambda item: item[1], reverse=True))
     return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,
-        open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,category_usage_counts=category_usage_counts,
+        open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,category_progress=category_progress,
         indicator_usage_counts=indicator_usage_counts,status_values=[counts[s] for s in STATUSES],all_time_status_values=[all_time_status_counts[s] for s in STATUSES])
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
