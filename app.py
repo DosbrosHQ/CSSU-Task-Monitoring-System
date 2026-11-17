@@ -374,7 +374,11 @@ def create_assignment():
         created.append(item.id)
     db.session.commit()
     for item_id in created: audit('Delegated indicator','delegated_indicator',item_id)
-    flash('Indicator delegated to '+('all active staff ('+str(len(created))+')' if assignee=='all' else members[0].full_name)+'.','success')
+    recipient_label = 'all active staff ('+str(len(created))+')' if assignee=='all' else members[0].full_name
+    if due and due < date.today():
+        flash('OVERDUE ASSIGNMENT ALERT: The due date '+due.isoformat()+' is in the past. This indicator was delegated to '+recipient_label+'. Please review the overdue assignment.','danger')
+    else:
+        flash('Indicator delegated to '+recipient_label+'.','success')
     return redirect(url_for('assignments'))
 @app.post('/assignments/<int:tid>/update')
 @login_required
