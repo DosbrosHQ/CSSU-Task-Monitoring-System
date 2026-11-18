@@ -538,6 +538,16 @@ def audit_page():
     total = AuditLog.query.count()
     return render_template('audit.html', items=items, total=total)
 
+@app.route('/admin/audit/clear', methods=['POST'])
+@admin_required
+def clear_audit_logs():
+    deleted_count = AuditLog.query.count()
+    AuditLog.query.delete(synchronize_session=False)
+    db.session.commit()
+    audit('Cleared '+str(deleted_count)+' audit log entries after Excel export','audit_log_clear',None)
+    flash(str(deleted_count)+' audit log entries cleared. The clearing action was retained in the audit history.','success')
+    return redirect(url_for('audit_page'))
+
 @app.route('/admin/audit/export.xlsx')
 @admin_required
 def export_audit_excel():
