@@ -267,6 +267,84 @@ def dashboard():
     return render_template('dashboard.html',month=month,logs=logs,counts=counts,staff_counts=staff_counts,
         open_count=assignments.count(),staff_engagement_counts=staff_engagement_counts,
         category_progress=category_progress,progress_totals=progress_totals)
+@app.route('/admin/dashboard/export.xlsx')
+@admin_required
+def export_dashboard_excel():
+    workbook = Workbook()
+    overview = workbook.active
+    overview.title = 'Dashboard Summary'
+    categories = ['Strategic Functions', 'Core Functions', 'Support Functions']
+    statuses = ['Completed', 'Partial', 'Delegated']
+    all_logs = TaskLog.query.order_by(TaskLog.task_date.asc(), TaskLog.id.asc()).all()
+    all_delegations = DelegatedTask.query.order_by(DelegatedTask.created_at.asc(), DelegatedTask.id.asc()).all()
+    options = {item.id: item for item in TaskOption.query.all()}
+    category_map = {item.id: item.name for item in Category.query.all()}
+    category_progress = {name: {status: 0 for status in statuses} for name in categories}
+    delegated_pairs = set()
+    for assignment in all_delegations:
+        category_id = assignment.category_id or (options.get(assignment.task_option_id).category_id if options.get(assignment.task_option_id) else None)
+        category_name = category_map.get(category_id)
+        if category_name in category_progress:
+            category_progress[category_name]['Delegated'] += 1
+        if assignment.task_option_id:
+            delegated_pairs.add((assignment.assigned_to, assignment.task_option_id))
+    for entry in all_logs:
+        category_id = entry.category_id or (options.get(entry.task_option_id).category_id if options.get(entry.task_option_id) else None)
+        category_name = category_map.get(category_id)
+        if category_name not in category_progress:
+            continue
+        if entry.task_option_id and (entry.staff_id, entry.task_option_id) in delegated_pairs:
+            continue
+        category_progress[category_name]['Completed' if entry.status == 'Completed' else 'Partial'] += 1
+    totals = {status: sum(category_progress[name][status] for name in categories) for status in statuses}
+    overview.append(['CSSU Indicators Monitoring — Admin Dashboard'])
+    overview.append(['Generated (Philippine time)', datetime.now(ZoneInfo('Asia/Manila')).strftime('%Y-%m-%d %H:%M:%S')])
+    overview.append(['Coverage', 'All historical indicator entries and delegations'])
+    overview.append([])
+    overview.append(['Progress Status', 'Total'])
+    for status in statuses:
+        overview.append([status, totals[status]])
+    staff_sheet = workbook.create_sheet('Staff Engagement')
+    staff_sheet.append(['Staff Member', 'Indicator Entries Encoded'])
+    active_staff = User.query.filter_by(role='staff', active=True).order_by(User.full_name).all()
+    for person in active_staff:
+        staff_sheet.append([person.full_name, sum(1 for entry in all_logs if entry.staff_id == person.id)])
+    category_sheet = workbook.create_sheet('Category Progress')
+    category_sheet.append(['Major Final Output', 'Completed', 'Partial', 'Delegated', 'Total'])
+    for name in categories:
+        values = category_progress[name]
+        category_sheet.append([name, values['Completed'], values['Partial'], values['Delegated'], sum(values.values())])
+    entries_sheet = workbook.create_sheet('Indicator Entries')
+    entries_sheet.append(['Entry ID', 'Entry Date', 'Staff Member', 'Category', 'Indicator', 'Quantity', 'Status', 'Priority', 'Details / Notes', 'Issue / Reason', 'Endorsement', 'Endorsed To'])
+    for entry in all_logs:
+        entries_sheet.append([entry.id, entry.task_date.isoformat() if entry.task_date else '', entry.staff.full_name if entry.staff else '', entry.category.name if entry.category else category_map.get(options.get(entry.task_option_id).category_id, '') if options.get(entry.task_option_id) else '', entry.task_title or '', entry.quantity, entry.status, entry.priority, entry.details or '', entry.issue or '', entry.endorsement or '', entry.endorsed_to or ''])
+    delegated_sheet = workbook.create_sheet('Delegated Indicators')
+    delegated_sheet.append(['Delegation ID', 'Indicator', 'Category', 'Assigned To', 'Assigned By', 'Assigned Date', 'Due Date', 'Priority', 'Status', 'Instructions', 'Completion Note'])
+    for item in all_delegations:
+        delegated_sheet.append([item.id, item.title, item.category.name if item.category else category_map.get(options.get(item.task_option_id).category_id, '') if options.get(item.task_option_id) else '', item.staff.full_name if item.staff else '', item.assigner.full_name if item.assigner else '', item.assigned_date.isoformat() if item.assigned_date else '', item.due_date.isoformat() if item.due_date else '', item.priority or '', item.status or '', item.instructions or '', item.completion_note or ''])
+    header_fill = PatternFill('solid', fgColor='17365D')
+    for sheet in workbook.worksheets:
+        sheet.freeze_panes = 'A2'
+        if sheet.max_row >= 1 and sheet.max_column >= 1:
+            for cell in sheet[1]:
+                cell.font = Font(bold=True, color='FFFFFF')
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            sheet.auto_filter.ref = sheet.dimensions
+        for column_cells in sheet.columns:
+            width = min(max(max(len(str(cell.value or '')) for cell in column_cells) + 2, 12), 48)
+            sheet.column_dimensions[get_column_letter(column_cells[0].column)].width = width
+        for row in sheet.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(vertical='top', wrap_text=True)
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    response = make_response(output.getvalue())
+    response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    response.headers['Content-Disposition'] = 'attachment; filename=CSSU_Dashboard_Export.xlsx'
+    return response
+
 @app.route('/tasks', methods=['GET','POST'])
 @login_required
 def tasks():
