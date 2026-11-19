@@ -395,6 +395,14 @@ def update_task(tid):
         x.endorsed_to=request.form.get('endorsed_to',x.endorsed_to)
         x.issue=request.form.get('issue',x.issue)
         x.details=request.form.get('details',x.details)
+        start_time=request.form.get('start_time',x.start_time) or None
+        end_time=request.form.get('end_time',x.end_time) or None
+        for label, value in [('Start time', start_time), ('End time', end_time)]:
+            if value and not __import__('re').fullmatch(r'(?:[01]\\d|2[0-3]):[0-5]\\d', value):
+                flash(label+' must be in HH:MM format.', 'danger')
+                return redirect(url_for('tasks'))
+        x.start_time=start_time
+        x.end_time=end_time
         audit_action='Administrator updated indicator record'
     else:
         # Staff may edit their own indicator entry date and details only.
@@ -405,11 +413,34 @@ def update_task(tid):
             return redirect(url_for('tasks'))
         x.task_date=edited_date
         x.details=request.form.get('details',x.details)
-        audit_action='Staff updated indicator entry date and details'
+        start_time=request.form.get('start_time',x.start_time) or None
+        end_time=request.form.get('end_time',x.end_time) or None
+        for label, value in [('Start time', start_time), ('End time', end_time)]:
+            if value and not __import__('re').fullmatch(r'(?:[01]\\d|2[0-3]):[0-5]\\d', value):
+                flash(label+' must be in HH:MM format.', 'danger')
+                return redirect(url_for('tasks'))
+        x.start_time=start_time
+        x.end_time=end_time
+        audit_action='Staff updated indicator entry date, time and details'
     db.session.commit()
     audit(audit_action,'indicator',x.id)
     flash('Indicator record details updated.' if current_user.role!='admin' else 'Indicator record updated.','success')
     return redirect(url_for('tasks'))
+@app.post('/tasks/<int:tid>/delete')
+@login_required
+def delete_task(tid):
+    x=db.session.get(TaskLog,tid) or abort(404)
+    if current_user.role!='admin' and x.staff_id!=current_user.id:
+        abort(403)
+    label=x.task_title
+    owner=x.staff.full_name if x.staff else 'Unknown staff'
+    record_id=x.id
+    db.session.delete(x)
+    db.session.commit()
+    audit(('Administrator' if current_user.role=='admin' else 'Staff')+' deleted indicator record: '+label+' (staff: '+owner+')','indicator',record_id)
+    flash('Indicator entry deleted.','success')
+    return redirect(url_for('tasks'))
+
 @app.route('/assignments')
 @login_required
 def assignments():
